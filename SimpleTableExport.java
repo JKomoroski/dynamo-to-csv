@@ -1,6 +1,4 @@
-package com.alianza.foo;
-
-import module java.base;
+///usr/bin/env java -cp deps/\* --source 25 "$0" "$@" ; exit $?
 
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -8,7 +6,26 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.paginators.ScanIterable;
 
-class SimpleTableExport {
+// Runs 2 exports for each environment
+void main() throws Exception {
+    final List<String> envs =
+//                List.of("prod");
+            List.of("dev", "qa", "beta");
+
+    for (var env : envs) {
+        System.out.printf("Exporting %s%n", env);
+        new SimpleExporter("%s_%s_ax_account".formatted(env, env),
+                Path.of("%s_accounts.csv".formatted(env)),
+                new String[]{"partitionId", "accountId"}
+        ).scanAccountsToCSV();
+        new SimpleExporter("%s_%s_ax_end_user".formatted(env, env),
+                Path.of("%s_end_user.csv".formatted(env)),
+                new String[]{"partitionId", "accountId", "user_id"}
+        ).scanAccountsToCSV();
+    }
+}
+
+class SimpleExporter {
 
     /**
      * name of the dynamo table to scan
@@ -23,7 +40,7 @@ class SimpleTableExport {
      */
     private final String[] projectionExpression;
 
-    SimpleTableExport(String tableName, Path outputPath, String[] projectionExpression) {
+    SimpleExporter(String tableName, Path outputPath, String[] projectionExpression) {
         this.tableName = tableName;
         this.outputPath = outputPath;
         this.projectionExpression = projectionExpression;
@@ -39,7 +56,7 @@ class SimpleTableExport {
 
             ScanIterable scanIterable = dynamoClient.scanPaginator(scanRequest);
 
-            try(PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputPath))) {
+            try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputPath))) {
                 writer.println(String.join(",", projectionExpression));
 
                 scanIterable.items().stream()
@@ -73,23 +90,5 @@ class SimpleTableExport {
         }
         return value;
     }
-
-    // Runs 2 exports for each environment
-    static void main(String[] args) throws Exception {
-        final List<String> envs =
-//                List.of("prod");
-                List.of("dev", "qa", "beta");
-
-        for (var env : envs) {
-            System.out.printf("Exporting %s%n", env);
-            new SimpleTableExport("%s_%s_ax_account".formatted(env, env),
-                    Path.of("%s_accounts.csv".formatted(env)),
-                    new String[]{"partitionId", "accountId"}
-            ).scanAccountsToCSV();
-            new SimpleTableExport("%s_%s_ax_end_user".formatted(env, env),
-                    Path.of("%s_end_user.csv".formatted(env)),
-                    new String[]{"partitionId", "accountId", "user_id"}
-            ).scanAccountsToCSV();
-        }
-    }
 }
+
