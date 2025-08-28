@@ -10,32 +10,23 @@ import software.amazon.awssdk.services.dynamodb.paginators.ScanIterable;
 
 class SimpleTableExport {
 
+    /**
+     * name of the dynamo table to scan
+     */
     private final String tableName;
+    /**
+     * Path to the output csv file
+     */
     private final Path outputPath;
+    /**
+     * List of attributes to get from dynamo, they will also be used as the output csv column names
+     */
     private final String[] projectionExpression;
 
     SimpleTableExport(String tableName, Path outputPath, String[] projectionExpression) {
         this.tableName = tableName;
         this.outputPath = outputPath;
         this.projectionExpression = projectionExpression;
-    }
-
-    static void main(String[] args) throws Exception {
-        final List<String> envs =
-//                List.of("prod");
-                List.of("dev", "qa", "beta");
-
-        for (var env : envs) {
-            System.out.printf("Exporting %s%n", env);
-            new SimpleTableExport("%s_%s_ax_account".formatted(env, env),
-                    Path.of("%s_accounts.csv".formatted(env)),
-                    new String[]{"partitionId", "accountId"}
-            ).scanAccountsToCSV();
-            new SimpleTableExport("%s_%s_ax_end_user".formatted(env, env),
-                    Path.of("%s_end_user.csv".formatted(env)),
-                    new String[]{"partitionId", "accountId", "user_id"}
-            ).scanAccountsToCSV();
-        }
     }
 
     void scanAccountsToCSV() throws IOException {
@@ -81,5 +72,24 @@ class SimpleTableExport {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }
         return value;
+    }
+
+    // Runs 2 exports for each environment
+    static void main(String[] args) throws Exception {
+        final List<String> envs =
+//                List.of("prod");
+                List.of("dev", "qa", "beta");
+
+        for (var env : envs) {
+            System.out.printf("Exporting %s%n", env);
+            new SimpleTableExport("%s_%s_ax_account".formatted(env, env),
+                    Path.of("%s_accounts.csv".formatted(env)),
+                    new String[]{"partitionId", "accountId"}
+            ).scanAccountsToCSV();
+            new SimpleTableExport("%s_%s_ax_end_user".formatted(env, env),
+                    Path.of("%s_end_user.csv".formatted(env)),
+                    new String[]{"partitionId", "accountId", "user_id"}
+            ).scanAccountsToCSV();
+        }
     }
 }
