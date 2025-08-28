@@ -1,0 +1,2 @@
+dependencies:
+  software.amazon.awssdk:dynamodb: 2.32.30
