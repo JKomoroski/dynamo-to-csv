@@ -13,19 +13,15 @@ void main() throws Exception {
             List.of("dev", "qa", "beta");
 
     for (var env : envs) {
-        System.out.printf("Exporting %s%n", env);
-        new SimpleExporter("%s_%s_ax_account".formatted(env, env),
-                Path.of("%s_accounts.csv".formatted(env)),
-                new String[]{"partitionId", "accountId"}
-        ).scanAccountsToCSV();
-        new SimpleExporter("%s_%s_ax_end_user".formatted(env, env),
-                Path.of("%s_end_user.csv".formatted(env)),
-                new String[]{"partitionId", "accountId", "user_id"}
-        ).scanAccountsToCSV();
+        IO.println("Exporting " + env);
+         new SimpleExporter("%s_%s_ax_account".formatted(env, env), Path.of("%s_accounts.csv".formatted(env)),
+            new String[]{"partitionId", "accountId"}).scanAccountsToCSV();
+         new SimpleExporter("%s_%s_ax_end_user".formatted(env, env), Path.of("%s_end_user.csv".formatted(env)),
+                 new String[]{"partitionId", "accountId", "user_id"}).scanAccountsToCSV();
     }
 }
 
-class SimpleExporter {
+static class SimpleExporter {
 
     /**
      * name of the dynamo table to scan
@@ -47,6 +43,7 @@ class SimpleExporter {
     }
 
     void scanAccountsToCSV() throws IOException {
+        IO.println("Starting scan of " + tableName);
         try (DynamoDbClient dynamoClient = DynamoDbClient.builder().region(Region.US_EAST_2).build()) {
 
             ScanRequest scanRequest = ScanRequest.builder()
@@ -57,23 +54,21 @@ class SimpleExporter {
             ScanIterable scanIterable = dynamoClient.scanPaginator(scanRequest);
 
             try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputPath))) {
-                writer.println(String.join(",", projectionExpression));
+                writer.println(String.join(",", projectionExpression)); //header row
 
-                scanIterable.items().stream()
-                        .forEach(item -> {
-
-                            var row = new ArrayList<String>();
-
-                            for (var e : projectionExpression) {
-                                var raw = getAttributeValue(item, e);
-                                var escaped = escapeCSV(raw);
-                                row.add(escaped);
-                            }
-
-                            writer.printf("%s%n", String.join(",", row));
-                        });
+                scanIterable.items()
+                        .stream()
+                        .map(this::attributesToString)
+                        .forEach(s -> writer.printf("%s%n", s));
             }
         }
+    }
+
+    private String attributesToString(Map<String, AttributeValue> item) {
+        return Arrays.stream(projectionExpression)
+                .map(e -> getAttributeValue(item, e))
+                .map(this::escapeCSV)
+                .collect(Collectors.joining(","));
     }
 
     private String getAttributeValue(Map<String, AttributeValue> item, String key) {
