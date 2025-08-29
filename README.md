@@ -7,7 +7,7 @@
 ### Usage
 0. Export aws creds to your shell environment
 1. `jpm install`
-2. `./SimpleTableExport.java`
+2. `./SimpleTableExport.java dev qa beta`
 
 ### References
 - JEP 330: Launch Single-File Source-Code Programs

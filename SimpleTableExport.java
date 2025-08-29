@@ -7,10 +7,11 @@ import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.paginators.ScanIterable;
 
 // Runs 2 exports for each environment
-void main() throws Exception {
-    final List<String> envs =
-//                List.of("prod");
-            List.of("dev", "qa", "beta");
+void main(String[] envs) throws Exception {
+
+    if(envs == null || envs.length < 1) {
+        throw new IllegalArgumentException("Must provide at least one environment name");
+    }
 
     for (var env : envs) {
         IO.println("Exporting " + env);
