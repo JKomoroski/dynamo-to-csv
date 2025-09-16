@@ -59,7 +59,7 @@ public class SimpleTableExport {
             if (selectedAttributes.isEmpty()) {
                 System.out.println("No attributes selected. Exiting.");
                 return;
-    }
+            }
 
             // Build and run the exporter
             new SimpleExporter(tableName, Path.of(outputFile), selectedAttributes.toArray(new String[0]), CLIENT).scanToCSV();
@@ -203,21 +203,43 @@ public class SimpleTableExport {
         void scanToCSV() throws IOException {
             IO.println("Starting scan of " + tableName);
 
-            ScanRequest scanRequest = ScanRequest.builder()
-                    .tableName(tableName)
-                    .build();
+            var queue = new ArrayBlockingQueue<String>(1000);
+            AtomicBoolean done = new AtomicBoolean(false);
+            var executor = Executors.newSingleThreadScheduledExecutor();
+            CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
+                try (BufferedWriter bw = Files.newBufferedWriter(outputPath, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                    while (true) {
+                        String line = queue.poll(100, TimeUnit.MILLISECONDS);
+                        if (line != null) {
+                            bw.write(line);
+                        } else if (done.get() && queue.isEmpty()) {
+                            break;
+                        }
+                    }
+                } catch (IOException | InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }, executor);
 
-            ScanIterable scanIterable = dynamoClient.scanPaginator(scanRequest);
 
-            try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputPath))) {
-                writer.println(String.join(",", projectionExpression)); //header row
-
-                scanIterable.items()
-                        .stream()
-                        .map(this::attributesToString)
-                        .forEach(s -> writer.printf("%s%n", s));
-            }
-
+            int totalSegments = Runtime.getRuntime().availableProcessors(); // or whatever number you prefer
+            IntStream.range(0, totalSegments)
+                    .mapToObj(i -> ScanRequest.builder().tableName(tableName).totalSegments(totalSegments).segment(i).build())
+                    .map(r -> dynamoClient.scanPaginator(r))
+                    .flatMap(iter -> iter.items().stream())
+                    .parallel()
+                    .map(this::attributesToString)
+                    .map(line -> line + "\n")
+                    .forEach(l -> {
+                        try {
+                            queue.put(l);
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+            done.set(true);
+            writer.join();
+            executor.shutdown();
             System.out.println("Export completed: " + outputPath);
         }
 
