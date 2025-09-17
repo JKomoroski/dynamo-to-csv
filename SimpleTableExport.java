@@ -1,88 +1,114 @@
 ///usr/bin/env java -cp deps/\* --source 25 "$0" "$@" ; exit $?
 
-import module java.base;
-
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ListTablesRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
-import software.amazon.awssdk.services.dynamodb.paginators.ScanIterable;
 
-public class SimpleTableExport {
+void main(String[] args) throws Exception {
 
-    private static DynamoDbClient CLIENT;
-
-    void main(String[] args) throws Exception {
-
-        if (args != null && args.length <= 2) {
-            System.out.println(
-                    "Non-Interactive Usage: ./SimpleTableExport.java [outputFile] [tableName] [attribute1] [attribute2]");
-            System.out.println("Interactive Usage: ./SimpleTableExport.java");
-        }
-
-        try (var c = DynamoDbClient.builder().region(Region.US_EAST_2).build()) {
-            CLIENT = c;
-            if (args != null && args.length >= 3) {
-                // Command line mode: outputFile tableName attribute1 attribute2 ...
-                String outputFile = args[0];
-                String tableName = args[1];
-                String[] attributes = Arrays.copyOfRange(args, 2, args.length);
-
-                new SimpleExporter(tableName, Path.of(outputFile), attributes, CLIENT).scanToCSV();
-                return;
-            }
-
-            // Interactive mode
-            Scanner scanner = new Scanner(System.in);
-
-            // Get output file
-            System.out.print("Enter output CSV file name: ");
-            String outputFile = scanner.nextLine().trim();
-
-            // List tables and let user select
-            String tableName = selectTable(scanner);
-            if (tableName == null) {
-                System.out.println("No table selected. Exiting.");
-                return;
-            }
-
-            // Get attributes from a sample of the table
-            Set<String> availableAttributes = discoverAttributes(tableName);
-            if (availableAttributes.isEmpty()) {
-                System.out.println("No attributes found in table. Exiting.");
-                return;
-            }
-
-            // Let user select attributes
-            List<String> selectedAttributes = selectAttributes(scanner, availableAttributes);
-            if (selectedAttributes.isEmpty()) {
-                System.out.println("No attributes selected. Exiting.");
-                return;
-            }
-
-            // Build and run the exporter
-            new SimpleExporter(tableName, Path.of(outputFile), selectedAttributes.toArray(new String[0]), CLIENT).scanToCSV();
-        }
+    if (args != null && args.length > 0 && args.length < 3) {
+        IO.println(
+                "Non-Interactive Usage: ./SimpleTableExport.java [outputFile] [tableName] [attribute1] [attribute2] ...");
+        IO.println("Interactive Usage: ./SimpleTableExport.java");
     }
 
-    static String selectTable(Scanner scanner) throws Exception {
+    try (var exporter = new DynamoExporter(args)) {
+        if (args != null && args.length >= 3) {
+            exporter.handleCommandLineMode();
+        } else {
+            exporter.handleInteractiveMode();
+        }
+    }
+}
 
-        System.out.println("Listing DynamoDB tables...");
-        List<String> tables = CLIENT.listTables(ListTablesRequest.builder().build()).tableNames();
+static class DynamoExporter implements AutoCloseable {
+    private final String[] args;
+    private final DynamoDbClient client;
 
-        if (tables.isEmpty()) {
-            System.out.println("No tables found.");
+    DynamoExporter(String[] args) {
+        this.args = args;
+        this.client = DynamoDbClient.builder().region(Region.US_EAST_2).build();
+    }
+
+    void handleCommandLineMode() throws IOException {
+        var config = new ExportConfiguration(
+                args[1],
+                Path.of(args[0]),
+                Arrays.copyOfRange(args, 2, args.length)
+        );
+        new ParallelExporter(config, client).export();
+    }
+
+    void handleInteractiveMode() throws Exception {
+        var exportConfig = new InteractiveSession(client).configure();
+        new ParallelExporter(exportConfig, client).export();
+    }
+
+    @Override
+    public void close() {
+        client.close();
+    }
+}
+
+record ExportConfiguration(String tableName, Path outputPath, String[] attributes) {}
+
+static class InteractiveSession {
+
+    private final DynamoDbClient dynamoClient;
+    private final Scanner scanner;
+
+    InteractiveSession(DynamoDbClient dynamoClient) {
+        this.dynamoClient = dynamoClient;
+        this.scanner = new Scanner(System.in);
+    }
+
+    ExportConfiguration configure() throws Exception {
+        // Get output file
+        IO.print("Enter output CSV file name: ");
+        String outputFile = scanner.nextLine().trim();
+
+        // Select table
+        String tableName = selectTable();
+        if (tableName == null) {
+            IO.println("No table selected. Exiting.");
             return null;
         }
 
-        System.out.println("\nAvailable tables:");
+        // Discover and select attributes
+        Set<String> availableAttributes = discoverAttributes(tableName);
+        if (availableAttributes.isEmpty()) {
+            IO.println("No attributes found in table. Exiting.");
+            return null;
+        }
+
+        List<String> selectedAttributes = selectAttributes(availableAttributes);
+        if (selectedAttributes.isEmpty()) {
+            IO.println("No attributes selected. Exiting.");
+            return null;
+        }
+
+        return new ExportConfiguration(tableName, Path.of(outputFile),
+                selectedAttributes.toArray(new String[0]));
+    }
+
+    private String selectTable() throws Exception {
+        IO.println("Listing DynamoDB tables...");
+        List<String> tables = dynamoClient.listTables(ListTablesRequest.builder().build()).tableNames();
+
+        if (tables.isEmpty()) {
+            IO.println("No tables found.");
+            return null;
+        }
+
+        IO.println("\nAvailable tables:");
         for (int i = 0; i < tables.size(); i++) {
             System.out.printf("%d. %s%n", i + 1, tables.get(i));
         }
 
         while (true) {
-            System.out.print("\nSelect table (enter number): ");
+            IO.print("\nSelect table (enter number): ");
             String input = scanner.nextLine().trim();
 
             try {
@@ -90,47 +116,51 @@ public class SimpleTableExport {
                 if (selection >= 1 && selection <= tables.size()) {
                     return tables.get(selection - 1);
                 } else {
-                    System.out.println("Invalid selection. Please enter a number between 1 and " + tables.size());
+                    IO.println("Invalid selection. Please enter a number between 1 and " + tables.size());
                 }
             } catch (NumberFormatException e) {
-                System.out.println("Please enter a valid number.");
+                IO.println("Please enter a valid number.");
             }
         }
     }
 
-    static Set<String> discoverAttributes(String tableName) {
-        Set<String> attributes = new HashSet<>();
-        System.out.println("Scanning table to discover attributes...");
+    private Set<String> discoverAttributes(String tableName) {
+        IO.println("Scanning table to discover attributes...");
 
         ScanRequest scanRequest = ScanRequest.builder()
                 .tableName(tableName)
                 .limit(100) // Just scan first 100 items to discover attributes
                 .build();
 
-        var response = CLIENT.scan(scanRequest);
+        var attributes = dynamoClient.scan(scanRequest).items()
+                .stream()
+                .flatMap(item -> item.keySet().stream())
+                .collect(Collectors.toSet());
 
-        for (var item : response.items()) {
-            attributes.addAll(item.keySet());
-        }
-
-        System.out.printf("Found %d unique attributes from sample data.%n", attributes.size());
-
+        System.out.printf("Found %d unique attributes from sample data. %n", attributes.size());
         return attributes;
     }
 
-    static List<String> selectAttributes(Scanner scanner, Set<String> availableAttributes) {
+    private List<String> selectAttributes(Set<String> availableAttributes) {
         List<String> sortedAttributes = new ArrayList<>(availableAttributes);
         Collections.sort(sortedAttributes);
 
-        System.out.println("\nAvailable attributes:");
+        IO.println("\nAvailable attributes:");
         for (int i = 0; i < sortedAttributes.size(); i++) {
             System.out.printf("%d. %s%n", i + 1, sortedAttributes.get(i));
         }
 
         List<String> selectedAttributes = new ArrayList<>();
+        selectFromDiscoveredAttributes(sortedAttributes, selectedAttributes);
+        addCustomAttributes(selectedAttributes);
 
+        IO.println("\nSelected attributes: " + selectedAttributes);
+        return selectedAttributes;
+    }
+
+    private void selectFromDiscoveredAttributes(List<String> sortedAttributes, List<String> selectedAttributes) {
         while (true) {
-            System.out.print("\nSelect attributes (enter numbers separated by commas, or 'done' to finish): ");
+            IO.print("\nSelect attributes (enter numbers separated by commas, or 'done' to finish): ");
             String input = scanner.nextLine().trim();
 
             if ("done".equalsIgnoreCase(input)) {
@@ -145,127 +175,146 @@ public class SimpleTableExport {
                         String attribute = sortedAttributes.get(index - 1);
                         if (!selectedAttributes.contains(attribute)) {
                             selectedAttributes.add(attribute);
-                            System.out.println("Added: " + attribute);
+                            IO.println("Added: " + attribute);
                         }
                     } else {
-                        System.out.println("Invalid selection: " + index);
+                        IO.println("Invalid selection: " + index);
                     }
                 }
             } catch (NumberFormatException e) {
-                System.out.println("Please enter valid numbers separated by commas.");
+                IO.println("Please enter valid numbers separated by commas.");
             }
         }
+    }
 
-        // Ask if user wants to add additional attributes
-        System.out.print("\nWould you like to add any additional attributes not found in the sample? (y/n): ");
+    private void addCustomAttributes(List<String> selectedAttributes) {
+        IO.print("\nWould you like to add any additional attributes not found in the sample? (y/n): ");
         if (scanner.nextLine().trim().toLowerCase().startsWith("y")) {
             while (true) {
-                System.out.print("Enter attribute name (or 'done' to finish): ");
+                IO.print("Enter attribute name (or 'done' to finish): ");
                 String attribute = scanner.nextLine().trim();
                 if ("done".equalsIgnoreCase(attribute)) {
                     break;
                 }
                 if (!attribute.isEmpty() && !selectedAttributes.contains(attribute)) {
                     selectedAttributes.add(attribute);
-                    System.out.println("Added: " + attribute);
+                    IO.println("Added: " + attribute);
                 }
             }
         }
+    }
+}
 
-        System.out.println("\nSelected attributes: " + selectedAttributes);
-        return selectedAttributes;
+static class ParallelExporter {
+
+    private final String tableName;
+    private final Path outputPath;
+    private final String[] attributes;
+    private final DynamoDbClient dynamoClient;
+
+    ParallelExporter(ExportConfiguration configuration, DynamoDbClient dynamoClient) {
+        this.tableName = configuration.tableName();
+        this.outputPath = configuration.outputPath();
+        this.attributes = configuration.attributes();
+        this.dynamoClient = dynamoClient;
     }
 
-    static class SimpleExporter {
+    void export() throws IOException {
+        var attributeMap = buildAttributeNamesMap();
+        String header = String.join(",", attributeMap.values());
+        String projection = String.join(", ", attributeMap.keySet());
 
-        /**
-         * name of the dynamo table to scan
-         */
-        private final String tableName;
-        /**
-         * Path to the output csv file
-         */
-        private final Path outputPath;
-        /**
-         * List of attributes to get from dynamo, they will also be used as the output csv column names
-         */
-        private final String[] projectionExpression;
+        IO.println("Starting scan of " + tableName);
+        IO.println("Outputing scan to " + outputPath);
+        IO.println("Attributes scanned " + header);
 
-        private final DynamoDbClient dynamoClient;
-
-        SimpleExporter(String tableName, Path outputPath, String[] projectionExpression, DynamoDbClient dynamoClient) {
-            this.tableName = tableName;
-            this.outputPath = outputPath;
-            this.projectionExpression = projectionExpression;
-            this.dynamoClient = dynamoClient;
+        try (var csvWriter = new ConcurrentCSVWriter(outputPath, header)) {
+            scanTableInParallel(projection, attributeMap, csvWriter::writeLineAsync);
         }
 
-        void scanToCSV() throws IOException {
-            IO.println("Starting scan of " + tableName);
+        IO.println("Export completed: " + outputPath);
+    }
 
-            var attributeNames = Arrays.stream(projectionExpression).collect(Collectors.toMap(s -> "#" + s, Function.identity()));
-            String projection = String.join(", ", attributeNames.keySet());
+    private Map<String, String> buildAttributeNamesMap() {
+        return Arrays.stream(attributes)
+                .collect(Collectors.toMap(s -> "#" + s, Function.identity()));
+    }
 
-            var queue = new ArrayBlockingQueue<String>(10_000);
-            AtomicBoolean done = new AtomicBoolean(false);
-            var executor = Executors.newSingleThreadScheduledExecutor();
-            CompletableFuture<Void> writer = CompletableFuture.runAsync(() -> {
-                try (BufferedWriter bw = Files.newBufferedWriter(outputPath, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
-                    while (true) {
-                        String line = queue.poll(1_000, TimeUnit.MILLISECONDS);
-                        if (line != null) {
-                            bw.write(line);
-                        } else if (done.get() && queue.isEmpty()) {
-                            break;
-                        }
+    private void scanTableInParallel(String projection, Map<String, String> attributeNames, Consumer<String> consumer) {
+        int totalSegments = Runtime.getRuntime().availableProcessors() * 4;
+        final var builder = ScanRequest.builder().tableName(tableName).totalSegments(totalSegments).projectionExpression(projection)
+                .expressionAttributeNames(attributeNames);
+        IntStream.range(0, totalSegments)
+                .mapToObj(i -> builder.segment(i).build())
+                .flatMap(request -> dynamoClient.scanPaginator(request).items().stream())
+                .parallel()
+                .map(this::itemToCSVLine)
+                .forEach(consumer);
+    }
+
+    private String itemToCSVLine(Map<String, AttributeValue> item) {
+        return Arrays.stream(attributes)
+                .map(attr -> getAttributeValue(item, attr))
+                .map(this::escapeCSV)
+                .collect(Collectors.joining(",", "", "\n"));
+    }
+
+    private String getAttributeValue(Map<String, AttributeValue> item, String key) {
+        AttributeValue value = item.get(key);
+        return value != null ? value.s() : "";
+    }
+
+    private String escapeCSV(String value) {
+        if (value == null) {
+            return "";
+        }
+        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
+    }
+}
+
+static class ConcurrentCSVWriter implements AutoCloseable {
+
+    private final ArrayBlockingQueue<String> queue = new ArrayBlockingQueue<>(10_000);
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean done = new AtomicBoolean(false);
+    private final CompletableFuture<Void> writerTask;
+
+    ConcurrentCSVWriter(Path outputPath, String header) {
+        this.writerTask = CompletableFuture.runAsync(() -> {
+            try (BufferedWriter writer = Files.newBufferedWriter(outputPath, StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND)) {
+                writer.write(header);
+                writer.newLine();
+                do {
+                    String line = queue.poll(1, TimeUnit.SECONDS);
+                    if (line != null) {
+                        writer.write(line);
                     }
-                } catch (IOException | InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            }, executor);
+                } while (!done.get() || !queue.isEmpty());
+            } catch (IOException | InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }, executor);
+    }
 
+    void writeLineAsync(String line) {
+        try {
+            queue.put(line);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+    }
 
-            int totalSegments = Runtime.getRuntime().availableProcessors() * 4;
-            IntStream.range(0, totalSegments)
-                    .mapToObj(i -> ScanRequest.builder().tableName(tableName).totalSegments(totalSegments).segment(i)
-                            .projectionExpression(projection).expressionAttributeNames(attributeNames).build())
-                    .flatMap(r -> dynamoClient.scanPaginator(r).items().stream())
-                    .parallel()
-                    .map(this::attributesToString)
-                    .map(line -> line + "\n")
-                    .forEach(l -> {
-                        try {
-                            queue.put(l);
-                        } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
-                        }
-                    });
+    public void close() {
+        try {
             done.set(true);
-            writer.join();
+            writerTask.join();
+        } finally {
             executor.shutdown();
-            System.out.println("Export completed: " + outputPath);
-        }
-
-        private String attributesToString(Map<String, AttributeValue> item) {
-            return Arrays.stream(projectionExpression)
-                    .map(e -> getAttributeValue(item, e))
-                    .map(this::escapeCSV)
-                    .collect(Collectors.joining(","));
-        }
-
-        private String getAttributeValue(Map<String, AttributeValue> item, String key) {
-            AttributeValue value = item.get(key);
-            return value != null ? value.s() : "";
-        }
-
-        private String escapeCSV(String value) {
-            if (value == null) {
-                return "";
-            }
-            if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
-                return "\"" + value.replace("\"", "\"\"") + "\"";
-            }
-            return value;
         }
     }
 }
