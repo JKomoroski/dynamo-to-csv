@@ -12,6 +12,7 @@ void main(String[] args) throws Exception {
         IO.println(
                 "Non-Interactive Usage: ./SimpleTableExport.java [outputFile] [tableName] [attribute1] [attribute2] ...");
         IO.println("Interactive Usage: ./SimpleTableExport.java");
+        return;
     }
 
     try (var exporter = new DynamoExporter(args)) {
@@ -219,16 +220,17 @@ static class ParallelExporter {
         this.dynamoClient = dynamoClient;
     }
 
-    void export() throws IOException {
+    void export() {
         var attributeMap = buildAttributeNamesMap();
         String header = String.join(",", attributeMap.values());
         String projection = String.join(", ", attributeMap.keySet());
 
         IO.println("Starting scan of " + tableName);
-        IO.println("Outputing scan to " + outputPath);
+        IO.println("Outputting scan to " + outputPath);
         IO.println("Attributes scanned " + header);
 
-        try (var csvWriter = new ConcurrentCSVWriter(outputPath, header)) {
+        try (var csvWriter = new ConcurrentCSVWriter(outputPath)) {
+            csvWriter.writeLineAsync(header + "\n");
             scanTableInParallel(projection, attributeMap, csvWriter::writeLineAsync);
         }
 
@@ -282,12 +284,9 @@ static class ConcurrentCSVWriter implements AutoCloseable {
     private final AtomicBoolean done = new AtomicBoolean(false);
     private final CompletableFuture<Void> writerTask;
 
-    ConcurrentCSVWriter(Path outputPath, String header) {
+    ConcurrentCSVWriter(Path outputPath) {
         this.writerTask = CompletableFuture.runAsync(() -> {
-            try (BufferedWriter writer = Files.newBufferedWriter(outputPath, StandardOpenOption.CREATE,
-                    StandardOpenOption.APPEND)) {
-                writer.write(header);
-                writer.newLine();
+            try (var writer = Files.newBufferedWriter(outputPath)) {
                 do {
                     String line = queue.poll(1, TimeUnit.SECONDS);
                     if (line != null) {
