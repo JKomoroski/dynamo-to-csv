@@ -222,7 +222,7 @@ static class ParallelExporter {
 
     void export() {
         var attributeMap = buildAttributeNamesMap();
-        String header = String.join(",", attributeMap.values());
+        String header = String.join(",", attributes);
         String projection = String.join(", ", attributeMap.keySet());
 
         IO.println("Starting scan of " + tableName);
