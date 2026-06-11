@@ -5,11 +5,12 @@
 - Java 25
 
 ### Usage
-0. Export aws creds to your shell environment (e.g.):
+0. Export aws creds and region to your shell environment (e.g.):
 ```
 export AWS_ACCESS_KEY_ID=""
 export AWS_SECRET_ACCESS_KEY=""
 export AWS_SESSION_TOKEN=""
+export AWS_REGION=""         # or configure via ~/.aws/config
 ```
 1. `jpm install`
 2. `./SimpleTableExport.java`

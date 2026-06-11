@@ -2,4 +2,5 @@ dependencies:
   software.amazon.awssdk:dynamodb: 2.46.7
   org.slf4j:slf4j-simple: 2.0.18
 actions:
+  test: "javac --source 25 --enable-preview -cp {{deps}} -sourcepath . SimpleTableExport.java"
   clean: "rm -f *.class shared/*.class *.csv *.zip"

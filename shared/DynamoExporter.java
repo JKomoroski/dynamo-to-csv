@@ -1,5 +1,4 @@
 package shared;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -11,7 +10,9 @@ public class DynamoExporter implements AutoCloseable {
 
     public DynamoExporter(String[] args) {
         this.args = args;
-        this.client = DynamoDbClient.builder().region(Region.US_EAST_2).build();
+        // Region is resolved via the standard AWS provider chain:
+        // AWS_REGION / AWS_DEFAULT_REGION env vars, ~/.aws/config, EC2/ECS metadata, etc.
+        this.client = DynamoDbClient.create();
     }
 
     public void handleCommandLineMode() throws IOException {
