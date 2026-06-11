@@ -1,3 +1,5 @@
 dependencies:
   software.amazon.awssdk:dynamodb: 2.46.7
   org.slf4j:slf4j-simple: 2.0.18
+actions:
+  clean: "rm -f *.class shared/*.class *.csv *.zip"
