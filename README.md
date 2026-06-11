@@ -6,9 +6,11 @@
 
 ### Usage
 0. Export aws creds to your shell environment (e.g.):
-    - export AWS_ACCESS_KEY_ID=""
-    - export AWS_SECRET_ACCESS_KEY=""
-    - export AWS_SESSION_TOKEN=""
+```
+export AWS_ACCESS_KEY_ID=""
+export AWS_SECRET_ACCESS_KEY=""
+export AWS_SESSION_TOKEN=""
+```
 1. `jpm install`
 2. `./SimpleTableExport.java`
     - Starts in interactive mode
@@ -36,8 +38,8 @@ Complex types (`L`, `M`) preserve each element's DynamoDB type wrapper (e.g. `{ 
 - Benchmark with a profiler to improve performance, but it's likely limited by dynamo
 
 ### References
-- JEP 330: Launch Single-File Source-Code Programs
-- JEP 458: Launch Multi-File Source-Code Programs
-- JEP 477: Instance Main Methods and Implicit Classes
+- [JEP 330: Launch Single-File Source-Code Programs](https://openjdk.org/jeps/330)
+- [JEP 458: Launch Multi-File Source-Code Programs](https://openjdk.org/jeps/458)
+- [JEP 512: Compact Source Files and Instance Main Methods](https://openjdk.org/jeps/512)
 - https://www.youtube.com/watch?v=04wFgshWMdA
 - https://horstmann.com/presentations/2025/javaone/#(1)
