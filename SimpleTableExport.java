@@ -263,15 +263,57 @@ static class ParallelExporter {
 
     private String getAttributeValue(Map<String, AttributeValue> item, String key) {
         AttributeValue value = item.get(key);
-        return value != null ? value.s() : "";
+        return value != null ? toTopLevelString(value) : "";
+    }
+
+    private String toTopLevelString(AttributeValue av) {
+        return switch (av) {
+            case AttributeValue v when v.s() != null -> v.s();
+            case AttributeValue v when v.n() != null -> v.n();
+            case AttributeValue v when v.bool() != null -> v.bool().toString();
+            case AttributeValue v when v.l() != null -> toList(v.l());
+            case AttributeValue v when v.m() != null -> toMap(v.m());
+            case AttributeValue v when v.ss() != null -> String.join("|", v.ss());
+            case AttributeValue v when v.ns() != null -> String.join("|", v.ns());
+            default -> "";
+        };
+    }
+
+    private String toList(java.util.List<AttributeValue> list) {
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < list.size(); i++) {
+            sb.append(toTyped(list.get(i)));
+            if (i < list.size() - 1) sb.append(", ");
+        }
+        return sb.append("]").toString();
+    }
+
+    private String toMap(Map<String, AttributeValue> map) {
+        var sb = new StringBuilder("{");
+        var it = map.entrySet().iterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            sb.append(" \"").append(e.getKey()).append("\" : ").append(toTyped(e.getValue()));
+            if (it.hasNext()) sb.append(",");
+        }
+        return sb.append(" }").toString();
+    }
+
+    private String toTyped(AttributeValue av) {
+        return switch (av) {
+            case AttributeValue v when v.s() != null -> "{ \"S\" : \"" + v.s().replace("\"", "\\\"") + "\" }";
+            case AttributeValue v when v.n() != null -> "{ \"N\" : \"" + v.n() + "\" }";
+            case AttributeValue v when v.bool() != null -> "{ \"BOOL\" : " + v.bool() + " }";
+            case AttributeValue v when v.l() != null -> "{ \"L\" : " + toList(v.l()) + " }";
+            case AttributeValue v when v.m() != null -> "{ \"M\" : " + toMap(v.m()) + " }";
+            default -> "null";
+        };
     }
 
     private String escapeCSV(String value) {
-        if (value == null) {
-            return "";
-        }
+        if (value == null || value.isEmpty()) return "";
         if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
-            return "\"" + value.replace("\"", "\"\"") + "\"";
+            return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
         }
         return value;
     }
