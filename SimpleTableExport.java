@@ -5,6 +5,8 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ListTablesRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
+import software.amazon.awssdk.core.SdkBytes;
+import java.util.Base64;
 
 void main(String[] args) throws Exception {
 
@@ -267,19 +269,23 @@ static class ParallelExporter {
     }
 
     private String toTopLevelString(AttributeValue av) {
-        return switch (av) {
-            case AttributeValue v when v.s() != null -> v.s();
-            case AttributeValue v when v.n() != null -> v.n();
-            case AttributeValue v when v.bool() != null -> v.bool().toString();
-            case AttributeValue v when v.l() != null -> toList(v.l());
-            case AttributeValue v when v.m() != null -> toMap(v.m());
-            case AttributeValue v when v.ss() != null -> String.join("|", v.ss());
-            case AttributeValue v when v.ns() != null -> String.join("|", v.ns());
-            default -> "";
+        return switch (av.type()) {
+            case null                    -> "";
+            case S                       -> av.s();
+            case N                       -> av.n();
+            case BOOL                    -> av.bool().toString();
+            case NUL                     -> "";
+            case L                       -> toList(av.l());
+            case M                       -> toMap(av.m());
+            case SS                      -> toJsonStringArray(av.ss());
+            case NS                      -> toJsonStringArray(av.ns());
+            case B                       -> Base64.getEncoder().encodeToString(av.b().asByteArray());
+            case BS                      -> toJsonBase64Array(av.bs());
+            case UNKNOWN_TO_SDK_VERSION  -> "";
         };
     }
 
-    private String toList(java.util.List<AttributeValue> list) {
+    private String toList(List<AttributeValue> list) {
         var sb = new StringBuilder("[");
         for (int i = 0; i < list.size(); i++) {
             sb.append(toTyped(list.get(i)));
@@ -300,14 +306,38 @@ static class ParallelExporter {
     }
 
     private String toTyped(AttributeValue av) {
-        return switch (av) {
-            case AttributeValue v when v.s() != null -> "{ \"S\" : \"" + v.s().replace("\"", "\\\"") + "\" }";
-            case AttributeValue v when v.n() != null -> "{ \"N\" : \"" + v.n() + "\" }";
-            case AttributeValue v when v.bool() != null -> "{ \"BOOL\" : " + v.bool() + " }";
-            case AttributeValue v when v.l() != null -> "{ \"L\" : " + toList(v.l()) + " }";
-            case AttributeValue v when v.m() != null -> "{ \"M\" : " + toMap(v.m()) + " }";
-            default -> "null";
+        return switch (av.type()) {
+            case null                    -> "null";
+            case S                       -> "{ \"S\" : \"" + av.s().replace("\"", "\\\"") + "\" }";
+            case N                       -> "{ \"N\" : \"" + av.n() + "\" }";
+            case BOOL                    -> "{ \"BOOL\" : " + av.bool() + " }";
+            case NUL                     -> "{ \"NULL\" : true }";
+            case L                       -> "{ \"L\" : " + toList(av.l()) + " }";
+            case M                       -> "{ \"M\" : " + toMap(av.m()) + " }";
+            case SS                      -> "{ \"SS\" : " + toJsonStringArray(av.ss()) + " }";
+            case NS                      -> "{ \"NS\" : " + toJsonStringArray(av.ns()) + " }";
+            case B                       -> "{ \"B\" : \"" + Base64.getEncoder().encodeToString(av.b().asByteArray()) + "\" }";
+            case BS                      -> "{ \"BS\" : " + toJsonBase64Array(av.bs()) + " }";
+            case UNKNOWN_TO_SDK_VERSION  -> "null";
         };
+    }
+
+    private String toJsonStringArray(List<String> values) {
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            sb.append("\"").append(values.get(i).replace("\"", "\\\"")).append("\"");
+            if (i < values.size() - 1) sb.append(", ");
+        }
+        return sb.append("]").toString();
+    }
+
+    private String toJsonBase64Array(List<SdkBytes> values) {
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            sb.append("\"").append(Base64.getEncoder().encodeToString(values.get(i).asByteArray())).append("\"");
+            if (i < values.size() - 1) sb.append(", ");
+        }
+        return sb.append("]").toString();
     }
 
     private String escapeCSV(String value) {
