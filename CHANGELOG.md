@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-10-09
+
+### Added
+- Flag-based non-interactive CLI with default timestamped output filenames and built-in help
+- Export of all discovered attributes using a bounded, single-scan segmented workflow
+- Gzip and ZIP output compression in interactive and non-interactive modes
+- Paginated, filterable interactive selection for large table and attribute lists
+- DynamoDB Local integration tests covering CSV output, compression, and CLI behavior
+- AWS SSO credential support and custom DynamoDB endpoints through `AWS_ENDPOINT_URL`
+- `software.amazon.awssdk:sso` 2.55.13
+- `software.amazon.awssdk:ssooidc` 2.55.13
+
+### Changed
+- **Breaking:** Replaced positional non-interactive arguments with `--table`, `--attributes` or `--all-attributes`, and optional output and compression flags
+- CSV escaping now follows RFC 4180 for commas, quotes, and newlines
+- Separated the `build` action from the DynamoDB Local integration-test action
+- `software.amazon.awssdk:dynamodb` 2.46.7 -> 2.55.13
+- `org.slf4j:slf4j-simple` 2.0.18 -> 2.0.20
+
 ## [1.0.0] - 2026-06-11
 
 ### Added
@@ -19,4 +38,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jpm` `clean` action to remove `.class`, `.csv`, and `.zip` artifacts
 - Apache 2.0 license
 
+[2.0.0]: https://github.com/JKomoroski/dynamo-to-csv/releases/tag/v2.0.0
 [1.0.0]: https://github.com/JKomoroski/dynamo-to-csv/releases/tag/v1.0.0
