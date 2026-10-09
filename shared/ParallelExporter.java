@@ -1,74 +1,76 @@
 package shared;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.function.*;
-import java.util.stream.*;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class ParallelExporter {
 
-    private final String tableName;
-    private final Path outputPath;
-    private final String[] attributes;
+    private final ExportConfiguration config;
     private final DynamoDbClient dynamoClient;
-    private final AttributeValueSerializer serializer = new AttributeValueSerializer();
 
-    ParallelExporter(ExportConfiguration configuration, DynamoDbClient dynamoClient) {
-        this.tableName = configuration.tableName();
-        this.outputPath = configuration.outputPath();
-        this.attributes = configuration.attributes();
+    public ParallelExporter(ExportConfiguration config, DynamoDbClient dynamoClient) {
+        this.config = config;
         this.dynamoClient = dynamoClient;
     }
 
-    void export() {
-        var attributeMap = buildAttributeNamesMap();
-        String header = String.join(",", attributes);
-        String projection = String.join(", ", attributeMap.keySet());
-
-        System.out.println("Starting scan of " + tableName);
-        System.out.println("Outputting scan to " + outputPath);
-        System.out.println("Attributes scanned " + header);
-
-        try (var csvWriter = new ConcurrentCSVWriter(outputPath)) {
-            csvWriter.writeLineAsync(header + "\n");
-            scanTableInParallel(projection, attributeMap, csvWriter::writeLineAsync);
-        }
-
-        System.out.println("Export completed: " + outputPath);
-    }
-
-    private Map<String, String> buildAttributeNamesMap() {
-        return Arrays.stream(attributes)
-                .collect(Collectors.toMap(s -> "#" + s, Function.identity()));
-    }
-
-    private void scanTableInParallel(String projection, Map<String, String> attributeNames, Consumer<String> consumer) {
+    public void export() throws IOException {
         int totalSegments = Runtime.getRuntime().availableProcessors() * 4;
-        final var builder = ScanRequest.builder().tableName(tableName).totalSegments(totalSegments)
-                .projectionExpression(projection).expressionAttributeNames(attributeNames);
-        IntStream.range(0, totalSegments)
-                .mapToObj(i -> builder.segment(i).build())
-                .flatMap(request -> dynamoClient.scanPaginator(request).items().stream())
-                .parallel()
-                .map(this::itemToCSVLine)
-                .forEach(consumer);
-    }
-
-    private String itemToCSVLine(Map<String, AttributeValue> item) {
-        return Arrays.stream(attributes)
-                .map(attr -> item.get(attr))
-                .map(value -> value != null ? serializer.serialize(value) : "")
-                .map(this::escapeCSV)
-                .collect(Collectors.joining(",", "", "\n"));
-    }
-
-    private String escapeCSV(String value) {
-        if (value == null || value.isEmpty()) return "";
-        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
-            return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        System.out.println("Starting scan of " + config.tableName());
+        System.out.println("Outputting scan to " + config.outputPath());
+        if (!config.allAttributes()) {
+            System.out.println("Attributes scanned: " + String.join(",", config.attributes()));
+        } else {
+            System.out.println("Discovering all attributes across " + totalSegments + " segments...");
         }
-        return value;
+
+        List<SegmentExporter.SegmentResult> results = runSegmentsInParallel(totalSegments);
+
+        System.out.println("Joining " + results.size() + " segment files...");
+        new AttributeJoiner(results, config).join();
+    }
+
+    private List<SegmentExporter.SegmentResult> runSegmentsInParallel(int totalSegments) throws IOException {
+        List<Thread> threads = new ArrayList<>(totalSegments);
+        List<SegmentExporter.SegmentResult> results = new ArrayList<>(totalSegments);
+        List<Throwable> errors = new ArrayList<>();
+
+        for (int i = 0; i < totalSegments; i++) {
+            int segment = i;
+            var exporter = new SegmentExporter(
+                    config.tableName(), segment, totalSegments,
+                    config.attributes(), config.allAttributes(), dynamoClient);
+            var thread = Thread.ofVirtual().start(() -> {
+                try {
+                    var result = exporter.export();
+                    synchronized (results) {
+                        results.add(result);
+                    }
+                } catch (Throwable t) {
+                    synchronized (errors) {
+                        errors.add(t);
+                    }
+                }
+            });
+            threads.add(thread);
+        }
+
+        for (var thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for segment exporters", e);
+            }
+        }
+
+        if (!errors.isEmpty()) {
+            var ex = new IOException("One or more segment exporters failed");
+            errors.forEach(ex::addSuppressed);
+            throw ex;
+        }
+
+        return results;
     }
 }
+
