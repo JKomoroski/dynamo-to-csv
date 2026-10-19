@@ -12,6 +12,11 @@ export AWS_SECRET_ACCESS_KEY=""
 export AWS_SESSION_TOKEN=""
 export AWS_REGION=""         # or configure via ~/.aws/config
 ```
+or
+```
+export AWS_PROFILE=""
+export AWS_REGION=""
+```
 
 Then install dependencies:
 ```
